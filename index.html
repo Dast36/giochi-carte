@@ -156,7 +156,8 @@ html,body{margin:0;height:100%;font-family:'Segoe UI',system-ui,sans-serif;
 #capturedCards .card{width:100%;max-width:68px}
 #capturedEmpty{text-align:center;opacity:.7;padding:22px}
 /* Raccolte sul tavolo: carte coperte, scope scoperte e ruotate */
-#capturePiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:6px;flex:0 0 auto;margin:0 0 4px;max-height:76px;overflow:hidden}
+#capturePiles,#bCapturePiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:6px;flex:0 0 auto;margin:0 0 4px;max-height:76px;overflow:hidden}
+#bCapturePiles{width:100%;margin:0 0 2px;}
 .capture-pile{display:flex;align-items:center;gap:7px;min-width:0;padding:4px 7px;border-radius:9px;background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.09)}
 .capture-pile.mine{border-color:rgba(255,215,110,.28);background:rgba(255,215,110,.07)}
 .pile-name{font-size:10px;font-weight:800;color:#ffe9a8;white-space:nowrap;max-width:54px;overflow:hidden;text-overflow:ellipsis}
@@ -171,7 +172,7 @@ html,body{margin:0;height:100%;font-family:'Segoe UI',system-ui,sans-serif;
 .pile-scope .card{width:27px;height:auto;flex:0 0 auto;transform:rotate(90deg);transform-origin:center center;box-shadow:0 2px 5px #0009;border-width:1px}
 .pile-scope .card::before{inset:2px}
 .pile-empty{font-size:9px;opacity:.45}
-@media(max-width:420px){#capturePiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;max-height:72px}.capture-pile{padding:3px 5px;gap:4px}.pile-name{max-width:43px;font-size:9px}.pile-stack{width:32px;flex-basis:32px}.pile-scope .card{width:23px}}
+@media(max-width:420px){#capturePiles,#bCapturePiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;max-height:72px}.capture-pile{padding:3px 5px;gap:4px}.pile-name{max-width:43px;font-size:9px}.pile-stack{width:32px;flex-basis:32px}.pile-scope .card{width:23px}}
 
 /* ---------- MODAL ---------- */
 #modal{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;
@@ -251,7 +252,7 @@ html,body{margin:0;height:100%;font-family:'Segoe UI',system-ui,sans-serif;
 #bTrump .card{width:clamp(42px,11vw,60px)}
 #bTrump .card.back{width:clamp(36px,9vw,48px)}
 #bStockCount{font-size:10px;opacity:.8}
-#bTrick{display:flex;align-items:center;justify-content:center;gap:clamp(5px,2vw,14px);flex-wrap:wrap;min-width:0}
+#bTrick{display:flex;align-items:center;justify-content:center;gap:clamp(5px,2vw,14px);flex-wrap:wrap;min-width:clamp(110px,32vw,190px);min-height:110px}
 .b-trick-card{display:flex;flex-direction:column;align-items:center;gap:3px;animation:card-land .2s ease-out}
 .b-trick-card small{font-size:10px;color:#ffe9a8;max-width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .b-trick-card .card{width:clamp(45px,12vw,66px)}
@@ -342,6 +343,7 @@ html,body{margin:0;height:100%;font-family:'Segoe UI',system-ui,sans-serif;
     <div id="bTrumpArea"><span class="b-caption">Briscola</span><div id="bTrump"></div><span id="bStockCount"></span></div>
     <div id="bTrick"></div>
   </div>
+  <div id="bCapturePiles" aria-label="Carte raccolte nella Briscola"></div>
   <div id="bScore"></div>
   <div id="bHand"></div>
   <div id="bResult" hidden></div>
@@ -736,6 +738,99 @@ async function animateCapturedCards(pi, captured){
   });
   await Promise.all(animations);
   cards.forEach(x=>x.clone.remove());
+}
+
+/* ------------------------------------------------------------------
+   BRISCOLA: animazioni coerenti con la Scopa.
+   La carta parte dalla mano/mazzetto dell'avversario, arriva al centro,
+   poi le carte della presa vengono evidenziate e raccolte nella pila.
+   ------------------------------------------------------------------ */
+function briscolaDelay(ms){return new Promise(resolve=>setTimeout(resolve,ms));}
+
+async function animateBriscolaCardToTrick(pi, card){
+  const target=document.getElementById('bTrick');
+  const vi=briscolaViewer();
+  const source=pi===vi
+    ? document.querySelector('#bHand .card[data-card-id="'+card.id+'"]')
+    : document.querySelector('#bPlayers .b-player[data-player-index="'+pi+'"] .b-mini-cards .card.back');
+  if(!target || !source){await briscolaDelay(100);return;}
+
+  const from=source.getBoundingClientRect();
+  const to=target.getBoundingClientRect();
+  const clone=cardEl(card);
+  clone.classList.add('flight-card');
+  const width=pi===vi?Math.max(54,from.width):72;
+  const height=width*88/62;
+  const startX=from.left+from.width/2;
+  const startY=from.top+from.height/2;
+  clone.style.left=(startX-width/2)+'px';
+  clone.style.top=(startY-height/2)+'px';
+  clone.style.width=width+'px';
+  clone.style.height=height+'px';
+  clone.style.borderRadius='8px';
+  document.body.appendChild(clone);
+
+  const dx=to.left+to.width/2-startX;
+  const dy=to.top+to.height/2-startY;
+  const duration=Math.min(1650,Math.max(1250,980+Math.hypot(dx,dy)*.44));
+  if(clone.animate){
+    const animation=clone.animate([
+      {transform:'translate3d(0,0,0) rotate(0deg) scale(1)',offset:0},
+      {transform:`translate3d(${dx*.48}px,${dy*.48-25}px,0) rotate(10deg) scale(1.13)`,offset:.56},
+      {transform:`translate3d(${dx}px,${dy}px,0) rotate(0deg) scale(.96)`,offset:1}
+    ],{duration,easing:'cubic-bezier(.22,.75,.25,1)',fill:'forwards'});
+    await new Promise(done=>{animation.onfinish=done;animation.oncancel=done;});
+  }else{
+    clone.style.transition=`transform ${duration}ms cubic-bezier(.22,.75,.25,1)`;
+    requestAnimationFrame(()=>{clone.style.transform=`translate3d(${dx}px,${dy}px,0) rotate(0deg) scale(.96)`;});
+    await briscolaDelay(duration+40);
+  }
+  clone.remove();
+}
+
+async function animateBriscolaTrickToPile(winner, cards){
+  if(!Array.isArray(cards)||!cards.length)return;
+  const trick=document.getElementById('bTrick');
+  const target=document.querySelector('#bCapturePiles .capture-pile[data-player-index="'+winner+'"] .pile-stack');
+  if(!trick||!target)return;
+  const targetRect=target.getBoundingClientRect();
+  const flights=[];
+  cards.forEach(card=>{
+    const source=[...trick.querySelectorAll('.card')].find(el=>el.dataset.cardId===card.id);
+    if(!source)return;
+    source.classList.add('capture-selected');
+    const rect=source.getBoundingClientRect();
+    const clone=cardEl(card);
+    clone.classList.add('flight-card');
+    clone.style.width='62px';
+    clone.style.height='88px';
+    clone.style.left=(rect.left+rect.width/2-31)+'px';
+    clone.style.top=(rect.top+rect.height/2-44)+'px';
+    document.body.appendChild(clone);
+    flights.push({clone,rect});
+  });
+  if(!flights.length)return;
+
+  // Lasciamo vedere la presa evidenziata prima di raccoglierla.
+  await briscolaDelay(480);
+  const animations=flights.map(({clone,rect},index)=>{
+    const dx=targetRect.left+targetRect.width/2-(rect.left+rect.width/2);
+    const dy=targetRect.top+targetRect.height/2-(rect.top+rect.height/2);
+    const duration=1120+index*55;
+    if(clone.animate){
+      const animation=clone.animate([
+        {transform:'translate3d(0,0,0) scale(1)',opacity:1},
+        {transform:`translate3d(${dx*.52}px,${dy*.52-20}px,0) scale(1.08)`,opacity:1,offset:.55},
+        {transform:`translate3d(${dx}px,${dy}px,0) rotateY(180deg) scale(.38)`,opacity:.24}
+      ],{duration,easing:'cubic-bezier(.2,.7,.25,1)',fill:'forwards'});
+      return new Promise(done=>{animation.onfinish=done;animation.oncancel=done;});
+    }
+    clone.style.transition=`transform ${duration}ms ease,opacity ${duration}ms ease`;
+    requestAnimationFrame(()=>{clone.style.transform=`translate3d(${dx}px,${dy}px,0) rotateY(180deg) scale(.38)`;clone.style.opacity='.24';});
+    return briscolaDelay(duration+30);
+  });
+  await Promise.all(animations);
+  flights.forEach(item=>item.clone.remove());
 }
 
 async function resolvePlay(pi, card, idxs){
@@ -1558,8 +1653,12 @@ function checkHostReady(){
 function hostOnMessage(conn,msg){
   if(!msg || typeof msg!=='object') return;
   if(msg.t==='b-play'){
-    if(B && B.phase==='play' && B.turn===conn.playerIndex && typeof msg.id==='string')
+    if(B && B.phase==='play' && !B.resolving && !B.animatingPlay && B.turn===conn.playerIndex && typeof msg.id==='string'){
       briscolaPlay(conn.playerIndex,msg.id);
+    }else if(B && conn.dc && conn.dc.open){
+      // Se il client ha uno stato non più aggiornato, gli rimandiamo quello corrente.
+      try{conn.dc.send({t:'b-state',s:briscolaPublicState(conn.playerIndex)});}catch(e){}
+    }
     return;
   }
   if(msg.t==='play'){
@@ -1718,6 +1817,17 @@ async function guestJoinRoom(){
     if(!openedConnection && !finished) finish('❌ Collegamento al servizio interrotto. Controlla Internet e riprova.');
   });
 }
+let briscolaRemoteAnimationQueue=Promise.resolve();
+let briscolaRemoteAnimationsPending=0;
+function queueBriscolaRemoteAnimation(task){
+  briscolaRemoteAnimationsPending++;
+  briscolaRemoteAnimationQueue=briscolaRemoteAnimationQueue.catch(()=>{}).then(task).catch(err=>{console.warn('Animazione remota Briscola:',err);}).finally(()=>{
+    briscolaRemoteAnimationsPending=Math.max(0,briscolaRemoteAnimationsPending-1);
+    if(B)renderBriscola();
+  });
+  return briscolaRemoteAnimationQueue;
+}
+
 function guestOnMessage(msg){
   if(!msg || typeof msg!=='object') return;
   if(msg.t==='hello'){
@@ -1725,8 +1835,19 @@ function guestOnMessage(msg){
   }else if(msg.t==='b-state'){
     activeGameType='briscola';
     B=msg.s;
+    if(B)B.waitingForPlay=false;
     showScreen('briscolaGame');
     renderBriscola();
+  }else if(msg.t==='b-animate-play'){
+    if(B && msg.card && Number.isInteger(msg.pi)){
+      B.animatingPlay=true;
+      B.waitingForPlay=true;
+      renderBriscola();
+      queueBriscolaRemoteAnimation(()=>animateBriscolaCardToTrick(msg.pi,msg.card));
+    }
+  }else if(msg.t==='b-animate-capture'){
+    if(B && Array.isArray(msg.cards) && Number.isInteger(msg.winner))
+      queueBriscolaRemoteAnimation(()=>animateBriscolaTrickToPile(msg.winner,msg.cards));
   }else if(msg.t==='animate-play'){
     if(G && msg.card && Number.isInteger(msg.pi)) animateCardToTable(msg.pi,msg.card);
   }else if(msg.t==='animate-capture'){
@@ -1799,7 +1920,7 @@ function startBriscola(names){
   const players=names.map(name=>({name,hand:[],captured:[]}));
   for(let r=0;r<3;r++) for(const p of players) p.hand.push(deck.pop());
   const trumpCard=deck[0]; // carta in fondo al mazzo: verrà pescata per ultima
-  B={players,deck,trumpCard,trumpSuit:trumpCard.s,turn:0,trick:[],phase:'play',resolving:false,lastWinner:null,scores:null,teamMode:players.length===4};
+  B={players,deck,trumpCard,trumpSuit:trumpCard.s,turn:0,trick:[],phase:'play',resolving:false,animatingPlay:false,waitingForPlay:false,lastWinner:null,scores:null,teamMode:players.length===4};
   document.getElementById('modal').hidden=true;
   showScreen('briscolaGame');
   renderBriscola();
@@ -1817,7 +1938,7 @@ function hostStartBriscola(n){
   startBriscola(names);
 }
 function briscolaViewer(){return mode==='guest'?myIndex:0;}
-function briscolaCanPlay(){return B && B.phase==='play' && !B.resolving && B.turn===briscolaViewer() && (mode==='bot'||mode==='host'||mode==='guest');}
+function briscolaCanPlay(){return B && B.phase==='play' && !B.resolving && !B.animatingPlay && !B.waitingForPlay && briscolaRemoteAnimationsPending===0 && B.turn===briscolaViewer() && (mode==='bot'||mode==='host'||mode==='guest');}
 function briscolaTrickWinner(trick){
   if(!trick.length) return 0;
   const leadSuit=trick[0].card.s;
@@ -1830,14 +1951,28 @@ function briscolaTrickWinner(trick){
   }
   return best.pi;
 }
-function briscolaPlay(pi,id){
-  if(!B || B.phase!=='play' || B.resolving || B.turn!==pi) return;
+async function briscolaPlay(pi,id){
+  if(!B || B.phase!=='play' || B.resolving || B.animatingPlay || B.turn!==pi) return;
+  const gameAtStart=B;
   const p=B.players[pi];
   if(!p || !Array.isArray(p.hand)) return;
   const idx=p.hand.findIndex(c=>c.id===id);
   if(idx<0) return;
-  const card=p.hand.splice(idx,1)[0];
+  const card=p.hand[idx];
+
+  // Prima si vede la carta partire dalla mano e raggiungere il tavolo.
+  B.animatingPlay=true;
+  renderBriscola();
+  if(mode==='host') Net.conns.forEach(conn=>{
+    if(conn&&conn.open){try{conn.send({t:'b-animate-play',pi,card});}catch(e){console.warn('Animazione Briscola non inviata',e);}}
+  });
+  await animateBriscolaCardToTrick(pi,card);
+  if(B!==gameAtStart)return;
+
+  p.hand.splice(idx,1);
   B.trick.push({pi,card});
+  B.animatingPlay=false;
+
   if(B.trick.length<B.players.length){
     B.turn=(pi+1)%B.players.length;
     renderBriscola();
@@ -1845,35 +1980,40 @@ function briscolaPlay(pi,id){
     scheduleBriscolaBot();
     return;
   }
+
+  // Tutte le carte sono sul tavolo: evidenziamo la presa e la raccogliamo.
   B.resolving=true;
   renderBriscola();
   if(mode==='host') broadcastBriscola();
   const trickSnapshot=B.trick.slice();
   const winner=briscolaTrickWinner(trickSnapshot);
-  setTimeout(()=>{
-    if(!B || B.phase!=='play' || B.trick.length!==trickSnapshot.length) return;
-    B.resolving=false;
-    B.players[winner].captured.push(...trickSnapshot.map(x=>x.card));
-    B.lastWinner=winner;
-    B.turn=winner;
-    // Il vincitore pesca per primo; gli altri seguono nell'ordine di gioco.
-    for(let k=0;k<B.players.length;k++){
-      const player=B.players[(winner+k)%B.players.length];
-      if(B.deck.length){
-        const drawn=B.deck.pop();
-        player.hand.push(drawn);
-        if(B.trumpCard && drawn.id===B.trumpCard.id) B.trumpCard=null;
-      }
+  if(mode==='host') Net.conns.forEach(conn=>{
+    if(conn&&conn.open){try{conn.send({t:'b-animate-capture',winner,cards:trickSnapshot.map(x=>x.card)});}catch(e){console.warn('Animazione presa Briscola non inviata',e);}}
+  });
+  await animateBriscolaTrickToPile(winner,trickSnapshot.map(x=>x.card));
+  if(B!==gameAtStart)return;
+
+  B.players[winner].captured.push(...trickSnapshot.map(x=>x.card));
+  B.lastWinner=winner;
+  B.turn=winner;
+  // Il vincitore pesca per primo; gli altri seguono nell'ordine di gioco.
+  for(let k=0;k<B.players.length;k++){
+    const player=B.players[(winner+k)%B.players.length];
+    if(B.deck.length){
+      const drawn=B.deck.pop();
+      player.hand.push(drawn);
+      if(B.trumpCard && drawn.id===B.trumpCard.id) B.trumpCard=null;
     }
-    B.trick=[];
-    if(B.deck.length===0 && B.players.every(pl=>pl.hand.length===0)){
-      B.phase='over';
-      B.scores=B.players.map(pl=>briscolaPoints(pl.captured));
-    }
-    renderBriscola();
-    if(mode==='host') broadcastBriscola();
-    if(B.phase==='play') scheduleBriscolaBot();
-  },850);
+  }
+  B.trick=[];
+  B.resolving=false;
+  if(B.deck.length===0 && B.players.every(pl=>pl.hand.length===0)){
+    B.phase='over';
+    B.scores=B.players.map(pl=>briscolaPoints(pl.captured));
+  }
+  renderBriscola();
+  if(mode==='host') broadcastBriscola();
+  if(B.phase==='play') scheduleBriscolaBot();
 }
 function scheduleBriscolaBot(){
   if(mode==='bot' && B && B.phase==='play' && B.turn===1)
@@ -1903,19 +2043,64 @@ function briscolaPublicState(forIndex){
   return {
     players:B.players.map((p,i)=>({name:p.name,hand:i===forIndex?p.hand:null,handCount:p.hand.length,capturedCount:p.captured.length,points:briscolaPoints(p.captured)})),
     deckCount:B.deck.length,trumpCard:B.trumpCard,trumpSuit:B.trumpSuit,turn:B.turn,
-    trick:B.trick,phase:B.phase,resolving:!!B.resolving,lastWinner:B.lastWinner,scores:B.scores,teamMode:B.teamMode
+    trick:B.trick,phase:B.phase,resolving:!!B.resolving,animatingPlay:!!B.animatingPlay,lastWinner:B.lastWinner,scores:B.scores,teamMode:B.teamMode
   };
 }
 function broadcastBriscola(){
   if(mode!=='host'||!B) return;
   Net.conns.forEach((conn,i)=>{if(conn&&conn.open){try{conn.send({t:'b-state',s:briscolaPublicState(i)});}catch(e){console.warn('Sync Briscola non riuscita',e);}}});
 }
+function renderBriscolaCapturePiles(){
+  const root=document.getElementById('bCapturePiles');
+  if(!root||!B)return;
+  const vi=briscolaViewer();
+  root.innerHTML='';
+  B.players.forEach((p,i)=>{
+    const count=Array.isArray(p.captured)?p.captured.length:(p.capturedCount||0);
+    const points=Array.isArray(p.captured)?briscolaPoints(p.captured):(p.points||0);
+    const pile=document.createElement('div');
+    pile.className='capture-pile'+(i===vi?' mine':'');
+    pile.dataset.playerIndex=i;
+    pile.title=count+' carte raccolte · '+points+' punti';
+    const name=document.createElement('span');
+    name.className='pile-name';
+    name.textContent=i===vi?'Tu':p.name;
+    const stack=document.createElement('div');
+    stack.className='pile-stack';
+    const backs=Math.min(4,count);
+    for(let k=0;k<backs;k++){
+      const back=document.createElement('span');
+      back.className='pile-back';
+      stack.appendChild(back);
+    }
+    if(count>4){
+      const badge=document.createElement('span');
+      badge.className='pile-count';
+      badge.textContent=count;
+      stack.appendChild(badge);
+    }
+    if(!count){
+      const empty=document.createElement('span');
+      empty.className='pile-empty';
+      empty.textContent='—';
+      stack.appendChild(empty);
+    }
+    const label=document.createElement('span');
+    label.className='pile-name';
+    label.textContent=count+' carte';
+    pile.append(name,stack,label);
+    root.appendChild(pile);
+  });
+}
+
 function renderBriscola(){
   if(!B) return;
   const vi=briscolaViewer();
   const info=document.getElementById('bInfo');
   if(B.phase==='over') info.textContent='Partita terminata';
   else if(B.resolving) info.textContent='Presa in corso…';
+  else if(B.animatingPlay || briscolaRemoteAnimationsPending>0) info.textContent='Carta in movimento…';
+  else if(B.waitingForPlay) info.textContent='Invio della carta…';
   else info.textContent=B.turn===vi?'▶ Tocca a te':'Turno di '+B.players[B.turn].name;
   const players=document.getElementById('bPlayers'); players.innerHTML='';
   B.players.forEach((p,i)=>{
@@ -1923,10 +2108,12 @@ function renderBriscola(){
     const points=p.captured?briscolaPoints(p.captured):(p.points||0);
     const d=document.createElement('div');
     d.className='b-player'+(B.turn===i&&B.phase==='play'?' active':'');
+    d.dataset.playerIndex=i;
     const team=B.teamMode?' · Squadra '+(i%2===0?'A':'B'):'';
     d.innerHTML=`<strong>${i===vi?'Tu':escapeHtml(p.name)}${team}</strong><small>${points} punti · ${p.captured?p.captured.length:(p.capturedCount||0)} prese</small><div class="b-mini-cards">${'<span class="card back"></span>'.repeat(cardCount)}</div>`;
     players.appendChild(d);
   });
+  renderBriscolaCapturePiles();
   const trump=document.getElementById('bTrump'); trump.innerHTML='';
   if(B.trumpCard) trump.appendChild(cardEl(B.trumpCard));
   else {const gone=document.createElement('span');gone.className='b-caption';gone.textContent='Pescata';trump.appendChild(gone);}
@@ -1969,7 +2156,12 @@ function renderBriscola(){
 }
 function briscolaClick(id){
   if(!briscolaCanPlay()) return;
-  if(mode==='guest'){sendToHost({t:'b-play',id});return;}
+  if(mode==='guest'){
+    B.waitingForPlay=true;
+    renderBriscola();
+    sendToHost({t:'b-play',id});
+    return;
+  }
   briscolaPlay(briscolaViewer(),id);
 }
 function restartBriscola(){
