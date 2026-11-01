@@ -1312,6 +1312,14 @@ const Net = {
   joinTimer: null
 };
 
+// CONFIGURAZIONE TURN METERED
+// Nel dashboard Metered: Get credential -> Show API Key.
+// Incolla qui la API Key della singola credenziale TURN (non la Secret Key
+// generale dell'account). La API Key scoped è prevista da Metered per l'uso
+// dal frontend. La risposta API di Metered è un array ICE servers.
+const METERED_APP_DOMAIN = 'giochi-carte.metered.live';
+const METERED_TURN_API_KEY = '1c579633313d3b4cbddd81fd46cb0cde6db0';
+
 const PEER_OPTIONS = {
   host: '0.peerjs.com',
   port: 443,
@@ -1323,8 +1331,53 @@ const PEER_OPTIONS = {
       { urls: 'stun:stun1.l.google.com:19302' }
     ]
   },
-  debug: 1
+  debug: 2
 };
+
+async function buildPeerOptions(){
+  const options = {
+    ...PEER_OPTIONS,
+    config: {
+      ...PEER_OPTIONS.config,
+      iceServers: [...PEER_OPTIONS.config.iceServers]
+    }
+  };
+  if(!METERED_TURN_API_KEY || METERED_TURN_API_KEY === 'INCOLLA_QUI_LA_API_KEY_METERED') return options;
+
+  const credentialsUrl = 'https://' + METERED_APP_DOMAIN +
+    '/api/v1/turn/credentials?apiKey=' + encodeURIComponent(METERED_TURN_API_KEY);
+  const response = await fetch(credentialsUrl, {
+    method: 'GET',
+    cache: 'no-store',
+    headers: { 'Accept': 'application/json' }
+  });
+  if(!response.ok){
+    if(response.status === 401) throw new Error('API Key Metered non valida: controlla Get credential → Show API Key.');
+    throw new Error('Metered TURN non raggiungibile (HTTP '+response.status+').');
+  }
+
+  // Metered restituisce direttamente un array, non { iceServers: [...] }.
+  const payload = await response.json();
+  const iceServerList = Array.isArray(payload) ? payload : payload && payload.iceServers;
+  if(!Array.isArray(iceServerList))
+    throw new Error('Risposta Metered non valida: manca l’elenco ICE servers.');
+
+  const remoteServers = iceServerList.map(server => {
+    const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+    // Evita gli URL alternativi sulla porta 53, che i browser possono bloccare.
+    const filtered = urls.filter(url => typeof url === 'string' && !/:53(?:\?|$)/.test(url));
+    return { ...server, urls: filtered };
+  }).filter(server => server.urls && server.urls.length);
+
+  const hasTurn = remoteServers.some(server => {
+    const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+    return urls.some(url => typeof url === 'string' && /^(turn|turns):/i.test(url));
+  });
+  if(!hasTurn) throw new Error('Il servizio ha risposto, ma non ha fornito server TURN validi.');
+
+  options.config.iceServers.push(...remoteServers);
+  return options;
+}
 
 function closeNet(){
   clearTimeout(Net.joinTimer);
@@ -1419,17 +1472,32 @@ async function createNumericRoom(){
     status.textContent='❌ Libreria di connessione non caricata. Controlla Internet e ricarica la pagina.';
     return;
   }
+  status.textContent='⏳ Preparo la connessione Internet…';
+  let peerOptions;
+  try{
+    peerOptions = await buildPeerOptions();
+  }catch(err){
+    status.textContent='❌ Configurazione TURN non riuscita: '+(err.message||'errore sconosciuto');
+    status.className='status';
+    return;
+  }
+  const turnEnabled = peerOptions.config.iceServers.some(server => {
+    const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+    return urls.some(url => typeof url === 'string' && /^(turn|turns):/i.test(url));
+  });
   let attempts=0;
   const tryCreate=()=>{
     attempts++;
     const code=makeRoomCode();
-    const peer=new Peer('scopa-'+code, PEER_OPTIONS);
+    const peer=new Peer('scopa-'+code, peerOptions);
     Net.peer=peer;
     peer.on('open', id=>{
       if(Net.peer!==peer) return;
       Net.roomCode=code;
       codeEl.textContent=code;
-      status.textContent='✅ Stanza pronta. Comunica il codice agli altri giocatori.';
+      status.textContent = turnEnabled
+        ? '✅ Stanza pronta. Collegamento TURN attivo: comunica il codice.'
+        : '✅ Stanza pronta. ⚠️ TURN non configurato: su alcune reti Internet il collegamento potrebbe fallire.';
       status.className='status ok';
     });
     peer.on('connection', conn=>{
@@ -1536,7 +1604,7 @@ function showJoin(){
   document.getElementById('joinRoomBtn').onclick=guestJoinRoom;
 }
 
-function guestJoinRoom(){
+async function guestJoinRoom(){
   const input=document.getElementById('roomCodeIn');
   const status=document.getElementById('joinStatus');
   const btn=document.getElementById('joinRoomBtn');
@@ -1554,16 +1622,32 @@ function guestJoinRoom(){
   clearTimeout(Net.joinTimer);
   if(Net.dc){try{Net.dc.close();}catch(e){} Net.dc=null;}
   if(Net.peer){try{Net.peer.destroy();}catch(e){} Net.peer=null;}
+  btn.disabled=true;
+  status.className='status';
+  status.textContent='⏳ Preparo la connessione Internet…';
+  let peerOptions;
+  try{
+    peerOptions = await buildPeerOptions();
+  }catch(err){
+    status.textContent='❌ Configurazione TURN non riuscita: '+(err.message||'errore sconosciuto');
+    btn.disabled=false;
+    return;
+  }
+  const turnEnabled = peerOptions.config.iceServers.some(server => {
+    const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+    return urls.some(url => typeof url === 'string' && /^(turn|turns):/i.test(url));
+  });
   let finished=false;
   let openedPeer=false;
   let openedConnection=false;
-  const peer=new Peer(undefined,PEER_OPTIONS);
+  const peer=new Peer(undefined,peerOptions);
   Net.peer=peer;
   Net.dc=null;
-  btn.disabled=true;
   input.disabled=false;
   status.className='status';
-  status.textContent='⏳ Connessione al servizio…';
+  status.textContent=turnEnabled
+    ? '⏳ Connessione al servizio con TURN attivo…'
+    : '⏳ Connessione al servizio… (TURN non configurato)';
 
   const finish=(message, ok=false)=>{
     if(finished) return;
@@ -1583,8 +1667,8 @@ function guestJoinRoom(){
   // Timeout globale: copre sia l'accesso al servizio sia la ricerca della stanza.
   Net.joinTimer=setTimeout(()=>{
     if(!openedPeer) finish('❌ Il servizio PeerJS non risponde. Controlla Internet e riprova.');
-    else if(!openedConnection) finish('⌛ Nessuna risposta dalla stanza entro 18 secondi. Verifica il codice o riprova più tardi.');
-  },18000);
+    else if(!openedConnection) finish('⌛ Collegamento non stabilito entro 30 secondi. Se il codice è corretto, è probabile un blocco NAT/firewall: verifica che TURN sia configurato e che entrambi usino il sito pubblico.');
+  },30000);
 
   peer.on('open',()=>{
     if(Net.peer!==peer || finished) return;
@@ -1612,7 +1696,7 @@ function guestJoinRoom(){
       guestOnMessage(msg);
     });
     conn.on('close',()=>{
-      if(!openedConnection) finish('❌ Stanza non raggiungibile o connessione interrotta. Controlla il codice e riprova.');
+      if(!openedConnection) finish('❌ La stanza risponde ma il collegamento dati non si è aperto. Possibile blocco NAT/firewall: serve TURN e il sito deve essere aperto da un indirizzo pubblico.');
       else {
         status.textContent='❌ Connessione chiusa dall’host.';
         status.className='status';
